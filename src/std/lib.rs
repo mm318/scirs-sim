@@ -1,1 +1,1 @@
-pub extern crate rust_model_stdlib_toy;
+pub use rust_model_stdlib_toy as toy;

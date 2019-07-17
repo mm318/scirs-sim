@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 
-extern crate rust_model_core;
 use rust_model_core::model::{Model, BlockId};
 use rust_model_core::block::{Block, BlockInput};
 
