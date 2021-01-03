@@ -1,15 +1,16 @@
+use std::fmt::Debug;
+
 use rust_model_core::block::Block;
 use rust_model_core::model::Model;
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct ConstBlock<T> {
     output1: T,
 }
 
-impl<T: 'static> Block for ConstBlock<T> {
-    fn calc(&mut self, _model: &Model) {}
-
-    fn update(&mut self) {}
+impl<T: 'static + Debug> Block for ConstBlock<T> {
+    fn calc(&self, _model: &Model) {}
+    fn update(&self) {}
 }
 
 impl<T: 'static + Clone> ConstBlock<T> {

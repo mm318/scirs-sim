@@ -7,19 +7,9 @@ pub trait BlockType {
     type BlockType;
 }
 
-// #[derive(Default)]
 pub struct BlockId<T> {
     block_idx: usize,
     data_type: PhantomData<T>,
-}
-
-impl<T> Default for BlockId<T> {
-    fn default() -> Self {
-        return BlockId {
-            block_idx: usize::default(),
-            data_type: PhantomData,
-        };
-    }
 }
 
 impl<T> BlockType for BlockId<T> {
@@ -51,18 +41,22 @@ impl Model {
         };
     }
 
-    pub fn get_block_base(&self, block_id: usize) -> &dyn Block {
-        return &*self.blocks[block_id];
+    pub fn get_block<B>(&self, block_id: &BlockId<B>) -> &dyn Block {
+        return self.get_block_by_idx(block_id.idx());
     }
 
-    fn get_block<B: Any>(&self, block_id: &BlockId<B>) -> &B {
+    pub fn get_block_by_idx(&self, block_idx: usize) -> &dyn Block {
+        return &*self.blocks[block_idx];
+    }
+
+    fn get_concrete_block<B: Any>(&self, block_id: &BlockId<B>) -> &B {
         return self.blocks[block_id.idx()]
             .as_any()
             .downcast_ref::<B>()
             .unwrap();
     }
 
-    fn get_mut_block<B: Any>(&mut self, block_id: &BlockId<B>) -> &mut B {
+    fn get_mut_concrete_block<B: Any>(&mut self, block_id: &BlockId<B>) -> &mut B {
         return self.blocks[block_id.idx()]
             .as_mut_any()
             .downcast_mut::<B>()
@@ -77,14 +71,28 @@ impl Model {
         block2_input: fn(&mut B, BlockInput<T>),
     ) {
         (block2_input)(
-            self.get_mut_block(block2_handle),
+            self.get_mut_concrete_block(block2_handle),
             BlockInput::new(block1_handle.idx(), block1_output),
         );
     }
 
-    pub fn exec(&self) {
-        for block in &self.blocks {
+    pub fn exec(&self, steps: usize) {
+        self.debug_state("step 0");
+        for step in 0..steps {
+            for block in &self.blocks {
+                block.calc(self);
+            }
+            for block in &self.blocks {
+                block.update();
+            }
+            self.debug_state(format!("step {}", step + 1).as_str());
+        }
+    }
 
+    fn debug_state(&self, state_id: &str) {
+        println!("{}:", state_id);
+        for (i, block) in self.blocks.iter().enumerate() {
+            println!("  block_id {} = {:?}", i, block);
         }
     }
 }
