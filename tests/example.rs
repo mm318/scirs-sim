@@ -2,6 +2,7 @@ use rust_model_core::model::Model;
 use rust_model_stdlib::toy::ToyBlockType1;
 use rust_model_stdlib::ConstBlock;
 
+#[test]
 fn main() {
     let mut model = Model::new();
 
@@ -40,7 +41,9 @@ fn main() {
     // get the result of the system
     //
     let result = ToyBlockType1::get_output1(model.get_block(&block2_handle));
-    println!("result: {}", result);
     // this will panic due to type mismatch
     // let result = ToyBlockType1::get_output1(model.get_block(&const_block_handle));
+
+    println!("result: {}", result);
+    assert_eq!(result, 42);
 }

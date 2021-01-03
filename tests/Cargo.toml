@@ -8,7 +8,7 @@ edition = "2018"
 rust_model_core = { path = "../src/core" }
 rust_model_stdlib = { path = "../src/std" }
 
-[[example]]
-name = "example_1"
-path = "src/example_1.rs"
+[[test]]
+name = "example"
+path = "example.rs"
 # crate-type = ["bin"]

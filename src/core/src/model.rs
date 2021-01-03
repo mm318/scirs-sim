@@ -77,7 +77,10 @@ impl Model {
     }
 
     pub fn exec(&self, steps: usize) {
+        // debug
         self.debug_state("step 0");
+        println!();
+
         for step in 0..steps {
             for block in &self.blocks {
                 block.calc(self);
@@ -85,7 +88,10 @@ impl Model {
             for block in &self.blocks {
                 block.update();
             }
+
+            // debug
             self.debug_state(format!("step {}", step + 1).as_str());
+            println!();
         }
     }
 

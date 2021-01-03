@@ -3,5 +3,5 @@
 members = [
     "src/core",
     "src/std",
-    "examples"
+    "tests"
 ]
