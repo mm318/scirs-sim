@@ -8,5 +8,8 @@ Attempt to create a Rust implementation of the Simulink engine
 To run the trivial example, execute the following command:
 
 ```
-cargo run --example example_1
+cargo test --test example -- --nocapture
 ```
+
+### TODO
+- Parallel execution
