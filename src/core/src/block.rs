@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::fmt::Debug;
 
 use crate::model::Model;
 
@@ -16,10 +17,9 @@ impl<T: Any> AsAny for T {
     }
 }
 
-// #[derive(Debug)]
-pub trait Block: AsAny {
-    fn calc(&mut self, model: &Model);
-    fn update(&mut self);
+pub trait Block: AsAny + Debug {
+    fn calc(&self, model: &Model);
+    fn update(&self);
 }
 
 pub struct BlockInput<T> {
@@ -30,7 +30,7 @@ pub struct BlockInput<T> {
 impl<T: Default> Default for BlockInput<T> {
     fn default() -> Self {
         return BlockInput {
-            block_id: usize::default(),
+            block_id: usize::MAX,
             value_func: Self::_dummy_func,
         };
     }
@@ -45,7 +45,7 @@ impl<T: Default> BlockInput<T> {
     }
 
     fn _dummy_func(_block: &dyn Block) -> T {
-        return T::default();
+        return Default::default();
     }
 
     pub fn set(&mut self, idx: usize, func: fn(&dyn Block) -> T) {
@@ -54,6 +54,18 @@ impl<T: Default> BlockInput<T> {
     }
 
     pub fn get_value(&self, model: &Model) -> T {
-        return (self.value_func)(model.get_block_base(self.block_id));
+        return (self.value_func)(model.get_block_by_idx(self.block_id));
+    }
+}
+
+impl<T> Debug for BlockInput<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockInput")
+            .field("block_id", &self.block_id)
+            .field(
+                "value_func",
+                &format_args!("{:p}", self.value_func as *const ()),
+            )
+            .finish()
     }
 }
