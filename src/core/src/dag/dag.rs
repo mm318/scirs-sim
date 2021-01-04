@@ -1,20 +1,12 @@
-// Taken from https://github.com/bunker-inspector/rs_taskflow/tree/master/src/flow/dag
+// Based on https://github.com/bunker-inspector/rs_taskflow/tree/master/src/flow/dag
 
+use std::cell::RefCell;
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::hash::Hash;
 
 use crate::dag::node::Node;
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct Dag<'a, 'b, T>
-where
-    T: Eq + Hash + Debug,
-{
-    pub roots: HashSet<&'a Node<'b, T>>,
-}
 
 enum CycleCheckStatus {
     Initial,
@@ -22,78 +14,88 @@ enum CycleCheckStatus {
     Processed,
 }
 
-impl<'a, 'b, T> Dag<'a, 'b, T>
-where
-    T: Eq + Hash + Debug,
-{
-    pub fn node(value: T) -> Node<'b, T> {
-        Node::new(value)
+#[derive(Eq, PartialEq, Debug)]
+pub struct Dag<T: Eq + Debug> {
+    nodes: Vec<Node<T>>,
+    edges: Vec<(usize, usize)>,
+
+    // visitation info
+    roots: RefCell<HashSet<usize>>,
+}
+
+impl<T: Eq + Debug> Dag<T> {
+    pub fn new() -> Self {
+        return Dag {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            roots: RefCell::new(HashSet::new()),
+        };
     }
 
-    pub fn build(nodes: Vec<&'a Node<'b, T>>) -> Dag<'a, 'b, T> {
-        let mut roots = HashSet::new();
+    pub fn add_node(&mut self, value: T) -> usize {
+        let id = self.nodes.len();
+        self.nodes.push(Node::new(id, value));
+        return id;
+    }
 
-        for node in nodes {
+    pub fn connect(&mut self, from_node_id: usize, to_node_id: usize) {
+        self.edges.push((from_node_id, to_node_id));
+    }
+
+    pub fn get_node(&self, node_id: usize) -> &Node<T> {
+        return &self.nodes[node_id];
+    }
+
+    pub fn get_mut_node(&mut self, node_id: usize) -> &mut Node<T> {
+        return &mut self.nodes[node_id];
+    }
+
+    // find roots
+    pub fn build_bfs_visit(&self) -> bool {
+        self.roots.replace(HashSet::new());
+        for node in &self.nodes {
+            node.dependencies.borrow_mut().clear();
+            node.dependants.borrow_mut().clear();
+        }
+        for (from_node_id, to_node_id) in &self.edges {
+            self.get_node(*from_node_id)
+                .add_dependant(&self.get_node(*to_node_id));
+            self.get_node(*to_node_id)
+                .add_dependency(&self.get_node(*from_node_id));
+        }
+
+        for node in &self.nodes {
             if node.dependencies.borrow().is_empty() {
-                roots.insert(node);
+                self.roots.borrow_mut().insert(node.id);
             }
         }
 
-        Dag::check(Dag { roots })
+        return self.check();
     }
 
-    pub fn insert(&mut self, new_node: &'a Node<'b, T>) {
-        if new_node.dependencies.borrow().is_empty() {
-            self.roots.insert(new_node);
-        }
-
-        Dag::_check(new_node, &mut HashMap::new());
-    }
-
-    pub fn connect(from: &'a Node<'a, T>, to: &'a Node<'a, T>) {
-        from.add_dependant(to);
-        to.add_dependency(from);
-    }
-
-    pub fn remove(&mut self, to_remove: &'a Node<'b, T>) {
-        to_remove.remove();
-
-        self.roots.remove(to_remove);
-
-        for node in to_remove.dependants.borrow().iter() {
-            if node.dependencies.borrow().is_empty() {
-                self.roots.insert(&node);
-            }
-        }
-    }
-
-    fn check(dag: Dag<'a, 'b, T>) -> Dag<'a, 'b, T> {
-        if dag.roots.is_empty() {
+    fn check(&self) -> bool {
+        if self.roots.borrow().is_empty() {
             panic!("No roots found. DAG is invalid!");
         }
 
-        if dag
+        if self
             .roots
+            .borrow()
             .iter()
-            .all(|root| Dag::_check(&root, &mut HashMap::new()))
+            .all(|root_id| self._check(root_id, &mut HashMap::new()))
         {
-            dag
+            return true;
         } else {
             panic!("Invalid DAG detected")
         }
     }
 
-    fn _check(
-        pt: &'a Node<'b, T>,
-        visited: &mut HashMap<&'a Node<'b, T>, CycleCheckStatus>,
-    ) -> bool {
-        visited.insert(pt, CycleCheckStatus::Processing);
+    fn _check(&self, pt: &usize, visited: &mut HashMap<usize, CycleCheckStatus>) -> bool {
+        visited.insert(*pt, CycleCheckStatus::Processing);
 
-        let deps = pt.dependants.borrow();
+        let deps = self.get_node(*pt).dependants.borrow();
 
         for dep in deps.iter() {
-            println!("Visiting {:?}", dep);
-
             let status = match visited.get(dep) {
                 Some(v) => v,
                 None => &CycleCheckStatus::Initial,
@@ -101,7 +103,7 @@ where
 
             match status {
                 CycleCheckStatus::Initial => {
-                    if !Dag::_check(dep, visited) {
+                    if !self._check(dep, visited) {
                         return false;
                     }
                 }
@@ -110,14 +112,43 @@ where
             }
         }
 
-        visited.insert(pt, CycleCheckStatus::Processed);
+        visited.insert(*pt, CycleCheckStatus::Processed);
+
         true
+    }
+
+    pub fn remove_as_dependency(&self, node_id: usize) {
+        let to_remove = &self.get_node(node_id);
+
+        for id in to_remove.dependants.borrow().iter() {
+            self.get_node(*id)
+                .dependencies
+                .borrow_mut()
+                .remove(&to_remove.id);
+        }
+
+        self.roots.borrow_mut().remove(&to_remove.id);
+
+        for id in to_remove.dependants.borrow().iter() {
+            if self.get_node(*id).dependencies.borrow().is_empty() {
+                self.roots.borrow_mut().insert(*id);
+            }
+        }
+    }
+
+    pub fn next_bfs_visit(&self) -> Option<&Node<T>> {
+        for id in self.roots.borrow().iter() {
+            return Some(&self.get_node(*id));
+        }
+        return None;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::dag::node::Node;
+    use crate::dag::Dag;
+    use std::collections::HashSet;
 
     #[derive(Hash, Eq, PartialEq, Debug)]
     struct MockStruct {
@@ -133,75 +164,84 @@ mod tests {
     #[test]
     #[should_panic]
     fn build_dag() {
-        let a = Dag::node(MockStruct::new('A'));
-        let b = Dag::node(MockStruct::new('B'));
-        let c = Dag::node(MockStruct::new('C'));
-        let d = Dag::node(MockStruct::new('D'));
-        let e = Dag::node(MockStruct::new('E'));
-        let f = Dag::node(MockStruct::new('F'));
-        let g = Dag::node(MockStruct::new('G'));
-        let h = Dag::node(MockStruct::new('H'));
+        let mut dag = Dag::new();
 
-        Dag::connect(&a, &b);
-        Dag::connect(&b, &c);
-        Dag::connect(&c, &d);
-        Dag::connect(&d, &e);
-        Dag::connect(&d, &f);
-        Dag::connect(&f, &g);
-        Dag::connect(&f, &h);
-        Dag::connect(&d, &b); // causes circular dependency
+        let a = dag.add_node(MockStruct::new('A'));
+        let b = dag.add_node(MockStruct::new('a'));
+        let c = dag.add_node(MockStruct::new('C'));
+        let d = dag.add_node(MockStruct::new('D'));
+        let e = dag.add_node(MockStruct::new('E'));
+        let f = dag.add_node(MockStruct::new('F'));
+        let g = dag.add_node(MockStruct::new('G'));
+        let h = dag.add_node(MockStruct::new('H'));
 
-        Dag::build(vec![&a, &b, &c, &d, &e, &f, &g, &h]);
+        dag.connect(a, b);
+        dag.connect(b, c);
+        dag.connect(c, d);
+        dag.connect(d, e);
+        dag.connect(d, f);
+        dag.connect(f, g);
+        dag.connect(f, h);
+        dag.connect(d, b); // causes circular dependency
+
+        dag.build();
     }
 
     #[test]
     fn remove_nodes() {
-        let a = Dag::node(MockStruct::new('A'));
-        let b = Dag::node(MockStruct::new('B'));
+        let mut dag = Dag::new();
 
-        Dag::connect(&a, &b);
-        let mut dag = Dag::build(vec![&a, &b]);
+        let a = dag.add_node(MockStruct::new('A'));
+        let b = dag.add_node(MockStruct::new('B'));
+
+        dag.connect(a, b);
+
+        dag.build();
 
         assert!(
-            !b.dependencies.borrow().is_empty(),
+            !dag.get_node(b).dependencies.borrow().is_empty(),
             "Node was not successfully removed"
         );
-        dag.remove(&a);
+
+        dag.remove_as_dependency(a);
+
         assert!(
-            b.dependencies.borrow().is_empty(),
+            dag.get_node(b).dependencies.borrow().is_empty(),
             "Node was not successfully removed"
         );
     }
 
     #[test]
     fn node_hash() {
-        let a = Node::new(MockStruct::new('A'));
-        let b = Node::new(MockStruct::new('B'));
-        let c = Node::new(MockStruct::new('C'));
-        let d = Node::new(MockStruct::new('D'));
-        let e = Node::new(MockStruct::new('E'));
-        let f = Node::new(MockStruct::new('F'));
-        let g = Node::new(MockStruct::new('G'));
-        let h = Node::new(MockStruct::new('H'));
+        let mut dag = Dag::new();
+
+        let a = dag.add_node(MockStruct::new('A'));
+        let b = dag.add_node(MockStruct::new('a'));
+        let c = dag.add_node(MockStruct::new('C'));
+        let d = dag.add_node(MockStruct::new('D'));
+        let e = dag.add_node(MockStruct::new('E'));
+        let f = dag.add_node(MockStruct::new('F'));
+        let g = dag.add_node(MockStruct::new('G'));
+        let h = dag.add_node(MockStruct::new('H'));
 
         let mut hash: HashSet<&Node<MockStruct>> = HashSet::new();
 
-        hash.insert(&a);
-        hash.insert(&b);
-        hash.insert(&c);
-        hash.insert(&d);
-        hash.insert(&e);
-        hash.insert(&f);
-        hash.insert(&g);
-        hash.insert(&h);
+        hash.insert(dag.get_node(a));
+        hash.insert(dag.get_node(b));
+        hash.insert(dag.get_node(c));
+        hash.insert(dag.get_node(d));
+        hash.insert(dag.get_node(e));
+        hash.insert(dag.get_node(f));
+        hash.insert(dag.get_node(g));
+        hash.insert(dag.get_node(h));
 
-        assert!(hash.contains(&a), "Node did not hash properly");
-        assert!(hash.contains(&b), "Node did not hash properly");
-        assert!(hash.contains(&c), "Node did not hash properly");
-        assert!(hash.contains(&d), "Node did not hash properly");
-        assert!(hash.contains(&e), "Node did not hash properly");
-        assert!(hash.contains(&f), "Node did not hash properly");
-        assert!(hash.contains(&g), "Node did not hash properly");
-        assert!(hash.contains(&h), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(a)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(b)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(c)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(d)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(e)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(f)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(g)), "Node did not hash properly");
+        assert!(hash.contains(dag.get_node(h)), "Node did not hash properly");
     }
 }
