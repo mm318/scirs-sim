@@ -2,6 +2,8 @@ use std::any::Any;
 use std::marker::PhantomData;
 
 use crate::block::{Block, BlockInput};
+use crate::dag::node::Node;
+use crate::dag::Dag;
 
 pub trait BlockType {
     type BlockType;
