@@ -137,10 +137,10 @@ impl<T: Eq + Debug> Dag<T> {
     }
 
     pub fn next_bfs_visit(&self) -> Option<&Node<T>> {
-        for id in self.roots.borrow().iter() {
-            return Some(&self.get_node(*id));
-        }
-        return None;
+        return match self.roots.borrow().iter().next() {
+            Some(id) => Some(&self.get_node(*id)),
+            None => None,
+        };
     }
 }
 
@@ -184,7 +184,7 @@ mod tests {
         dag.connect(f, h);
         dag.connect(d, b); // causes circular dependency
 
-        dag.build();
+        dag.build_bfs_visit();
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
 
         dag.connect(a, b);
 
-        dag.build();
+        dag.build_bfs_visit();
 
         assert!(
             !dag.get_node(b).dependencies.borrow().is_empty(),
