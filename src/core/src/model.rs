@@ -2,64 +2,70 @@ use std::any::Any;
 use std::marker::PhantomData;
 
 use crate::block::{Block, BlockInput};
-use crate::dag::node::Node;
 use crate::dag::Dag;
 
 pub trait BlockType {
     type BlockType;
 }
 
-pub struct BlockId<T> {
-    block_idx: usize,
+pub struct BlockHandle<T> {
+    block_id: usize,
     data_type: PhantomData<T>,
 }
 
-impl<T> BlockType for BlockId<T> {
+impl<T> BlockType for BlockHandle<T> {
     type BlockType = T;
 }
 
-impl<T> BlockId<T> {
-    pub fn idx(&self) -> usize {
-        return self.block_idx;
+impl<T> BlockHandle<T> {
+    pub fn id(&self) -> usize {
+        return self.block_id;
     }
 }
 
-// #[derive(Debug)]
 pub struct Model {
-    blocks: Vec<Box<dyn Block>>,
+    dag: Dag<Box<dyn Block>>,
 }
+
+// struct ModelTraversal {
+//     dag: Dag<'a, &'a dyn Block>,
+//     ready: VecDeque<&'a Node<'a, &'a dyn Block>>,
+// }
 
 impl Model {
     pub fn new() -> Self {
-        return Model { blocks: Vec::new() };
+        return Model { dag: Dag::new() };
     }
 
-    pub fn add_block<B: Block>(&mut self, new_block: B) -> BlockId<B> {
-        let idx = self.blocks.len();
-        self.blocks.push(Box::new(new_block));
-        return BlockId {
-            block_idx: idx,
+    pub fn add_block<B: Block>(&mut self, new_block: B) -> BlockHandle<B> {
+        let id = self.dag.add_node(Box::new(new_block));
+        return BlockHandle {
+            block_id: id,
             data_type: PhantomData,
         };
     }
 
-    pub fn get_block<B>(&self, block_id: &BlockId<B>) -> &dyn Block {
-        return self.get_block_by_idx(block_id.idx());
+    pub fn get_block_by_id(&self, block_id: usize) -> &dyn Block {
+        return &*self.dag.get_node(block_id).value;
     }
 
-    pub fn get_block_by_idx(&self, block_idx: usize) -> &dyn Block {
-        return &*self.blocks[block_idx];
+    pub fn get_block<B>(&self, block_handle: &BlockHandle<B>) -> &dyn Block {
+        return self.get_block_by_id(block_handle.id());
     }
 
-    fn get_concrete_block<B: Any>(&self, block_id: &BlockId<B>) -> &B {
-        return self.blocks[block_id.idx()]
+    fn get_concrete_block<B: Any>(&self, block_handle: &BlockHandle<B>) -> &B {
+        return self
+            .get_block(block_handle)
             .as_any()
             .downcast_ref::<B>()
             .unwrap();
     }
 
-    fn get_mut_concrete_block<B: Any>(&mut self, block_id: &BlockId<B>) -> &mut B {
-        return self.blocks[block_id.idx()]
+    fn get_mut_concrete_block<B: Any>(&mut self, block_handle: &BlockHandle<B>) -> &mut B {
+        return self
+            .dag
+            .get_mut_node(block_handle.id())
+            .value
             .as_mut_any()
             .downcast_mut::<B>()
             .unwrap();
@@ -67,40 +73,41 @@ impl Model {
 
     pub fn connect<A: Block, B: Block, T: Default>(
         &mut self,
-        block1_handle: &BlockId<A>,
+        block1_handle: &BlockHandle<A>,
         block1_output: fn(&dyn Block) -> T,
-        block2_handle: &BlockId<B>,
+        block2_handle: &BlockHandle<B>,
         block2_input: fn(&mut B, BlockInput<T>),
     ) {
         (block2_input)(
             self.get_mut_concrete_block(block2_handle),
-            BlockInput::new(block1_handle.idx(), block1_output),
+            BlockInput::new(block1_handle.id(), block1_output),
         );
+        self.dag.connect(block1_handle.id(), block2_handle.id());
     }
 
     pub fn exec(&self, steps: usize) {
-        // debug
-        self.debug_state("step 0");
-        println!();
-
         for step in 0..steps {
-            for block in &self.blocks {
-                block.calc(self);
-            }
-            for block in &self.blocks {
-                block.update();
-            }
-
             // debug
-            self.debug_state(format!("step {}", step + 1).as_str());
-            println!();
-        }
-    }
+            println!("\nstep {}", step + 1);
 
-    fn debug_state(&self, state_id: &str) {
-        println!("{}:", state_id);
-        for (i, block) in self.blocks.iter().enumerate() {
-            println!("  block_id {} = {:?}", i, block);
+            let result = self.dag.build_bfs_visit();
+            assert!(result);
+
+            loop {
+                match self.dag.next_bfs_visit() {
+                    Some(ref node) => {
+                        println!("  Visiting {:?}", node);
+
+                        self.dag.remove_as_dependency(node.id);
+
+                        node.value.calc(self);
+                        node.value.update();
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
         }
     }
 }
