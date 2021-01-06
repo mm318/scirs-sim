@@ -90,23 +90,26 @@ impl Model {
             // debug
             println!("\nstep {}", step + 1);
 
-            let result = self.dag.build_bfs_visit();
+            let result = self.dag.build_bfs();
             assert!(result);
 
             loop {
-                match self.dag.next_bfs_visit() {
+                match self.dag.next_in_bfs() {
                     Some(ref node) => {
                         println!("  Visiting {:?}", node);
 
-                        self.dag.remove_as_dependency(node.id);
+                        self.dag.remove_from_bfs(node.id);
 
                         node.value.calc(self);
-                        node.value.update();
                     }
                     None => {
                         break;
                     }
                 }
+            }
+
+            for node in self.dag.iter_nodes() {
+                node.value.update();
             }
         }
     }
