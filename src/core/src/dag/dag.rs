@@ -5,6 +5,7 @@ use std::cmp::Eq;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::slice::Iter;
 
 use crate::dag::node::Node;
 
@@ -50,27 +51,8 @@ impl<T: Eq + Debug> Dag<T> {
         return &mut self.nodes[node_id];
     }
 
-    // find roots
-    pub fn build_bfs_visit(&self) -> bool {
-        self.roots.replace(HashSet::new());
-        for node in &self.nodes {
-            node.dependencies.borrow_mut().clear();
-            node.dependants.borrow_mut().clear();
-        }
-        for (from_node_id, to_node_id) in &self.edges {
-            self.get_node(*from_node_id)
-                .add_dependant(&self.get_node(*to_node_id));
-            self.get_node(*to_node_id)
-                .add_dependency(&self.get_node(*from_node_id));
-        }
-
-        for node in &self.nodes {
-            if node.dependencies.borrow().is_empty() {
-                self.roots.borrow_mut().insert(node.id);
-            }
-        }
-
-        return self.check();
+    pub fn iter_nodes(&self) -> Iter<'_, Node<T>> {
+        return self.nodes.iter();
     }
 
     fn check(&self) -> bool {
@@ -117,7 +99,37 @@ impl<T: Eq + Debug> Dag<T> {
         true
     }
 
-    pub fn remove_as_dependency(&self, node_id: usize) {
+    // find roots
+    pub fn build_bfs(&self) -> bool {
+        self.roots.replace(HashSet::new());
+        for node in &self.nodes {
+            node.dependencies.borrow_mut().clear();
+            node.dependants.borrow_mut().clear();
+        }
+        for (from_node_id, to_node_id) in &self.edges {
+            self.get_node(*from_node_id)
+                .add_dependant(&self.get_node(*to_node_id));
+            self.get_node(*to_node_id)
+                .add_dependency(&self.get_node(*from_node_id));
+        }
+
+        for node in &self.nodes {
+            if node.dependencies.borrow().is_empty() {
+                self.roots.borrow_mut().insert(node.id);
+            }
+        }
+
+        return self.check();
+    }
+
+    pub fn next_in_bfs(&self) -> Option<&Node<T>> {
+        return match self.roots.borrow().iter().next() {
+            Some(id) => Some(&self.get_node(*id)),
+            None => None,
+        };
+    }
+
+    pub fn remove_from_bfs(&self, node_id: usize) {
         let to_remove = &self.get_node(node_id);
 
         for id in to_remove.dependants.borrow().iter() {
@@ -134,13 +146,6 @@ impl<T: Eq + Debug> Dag<T> {
                 self.roots.borrow_mut().insert(*id);
             }
         }
-    }
-
-    pub fn next_bfs_visit(&self) -> Option<&Node<T>> {
-        return match self.roots.borrow().iter().next() {
-            Some(id) => Some(&self.get_node(*id)),
-            None => None,
-        };
     }
 }
 
@@ -184,7 +189,7 @@ mod tests {
         dag.connect(f, h);
         dag.connect(d, b); // causes circular dependency
 
-        dag.build_bfs_visit();
+        dag.build_bfs();
     }
 
     #[test]
@@ -196,14 +201,14 @@ mod tests {
 
         dag.connect(a, b);
 
-        dag.build_bfs_visit();
+        dag.build_bfs();
 
         assert!(
             !dag.get_node(b).dependencies.borrow().is_empty(),
             "Node was not successfully removed"
         );
 
-        dag.remove_as_dependency(a);
+        dag.remove_from_bfs(a);
 
         assert!(
             dag.get_node(b).dependencies.borrow().is_empty(),
