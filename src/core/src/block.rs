@@ -22,6 +22,14 @@ pub trait Block: AsAny + Debug {
     fn update(&self);
 }
 
+impl PartialEq for dyn Block {
+    fn eq(&self, other: &Self) -> bool {
+        return self == other;
+    }
+}
+
+impl Eq for dyn Block {}
+
 pub struct BlockInput<T> {
     block_id: usize,
     value_func: fn(&dyn Block) -> T,
@@ -37,9 +45,9 @@ impl<T: Default> Default for BlockInput<T> {
 }
 
 impl<T: Default> BlockInput<T> {
-    pub fn new(idx: usize, func: fn(&dyn Block) -> T) -> Self {
+    pub fn new(id: usize, func: fn(&dyn Block) -> T) -> Self {
         return BlockInput {
-            block_id: idx,
+            block_id: id,
             value_func: func,
         };
     }
@@ -48,13 +56,13 @@ impl<T: Default> BlockInput<T> {
         return Default::default();
     }
 
-    pub fn set(&mut self, idx: usize, func: fn(&dyn Block) -> T) {
-        self.block_id = idx;
+    pub fn set(&mut self, id: usize, func: fn(&dyn Block) -> T) {
+        self.block_id = id;
         self.value_func = func;
     }
 
     pub fn get_value(&self, model: &Model) -> T {
-        return (self.value_func)(model.get_block_by_idx(self.block_id));
+        return (self.value_func)(model.get_block_by_id(self.block_id));
     }
 }
 
