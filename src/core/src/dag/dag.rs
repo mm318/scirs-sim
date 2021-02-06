@@ -1,6 +1,5 @@
 // Based on https://github.com/bunker-inspector/rs_taskflow/tree/master/src/flow/dag
 
-use std::cell::RefCell;
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -15,13 +14,115 @@ enum CycleCheckStatus {
     Processed,
 }
 
+pub struct DagVisitationInfo {
+    dependencies: Vec<HashSet<usize>>,
+    dependants: Vec<HashSet<usize>>,
+    roots: HashSet<usize>,
+}
+
+impl DagVisitationInfo {
+    fn new(len: usize) -> Self {
+        let mut result = DagVisitationInfo {
+            dependencies: Vec::with_capacity(len),
+            dependants: Vec::with_capacity(len),
+            roots: HashSet::new(),
+        };
+
+        result.dependencies.resize(len, HashSet::new());
+        result.dependants.resize(len, HashSet::new());
+
+        return result;
+    }
+
+    fn check(self) -> Result<Self, &'static str> {
+        if self.get_next_root().is_none() {
+            return Err("No roots found. DAG is invalid!");
+        }
+
+        if self
+            .get_roots()
+            .iter()
+            .all(|root_id| self._check(root_id, &mut HashMap::new()))
+        {
+            return Ok(self);
+        } else {
+            return Err("Invalid DAG detected");
+        }
+    }
+
+    fn _check(&self, curr_node_id: &usize, visited: &mut HashMap<usize, CycleCheckStatus>) -> bool {
+        visited.insert(*curr_node_id, CycleCheckStatus::Processing);
+
+        for dep in self.get_dependants(curr_node_id).iter() {
+            let status = match visited.get(dep) {
+                Some(v) => v,
+                None => &CycleCheckStatus::Initial,
+            };
+
+            match status {
+                CycleCheckStatus::Initial => {
+                    if !self._check(dep, visited) {
+                        return false;
+                    }
+                }
+                CycleCheckStatus::Processing => return false,
+                CycleCheckStatus::Processed => {}
+            }
+        }
+
+        visited.insert(*curr_node_id, CycleCheckStatus::Processed);
+
+        return true;
+    }
+
+    // dependencies are upstream
+    fn add_dependency(&mut self, from_node_id: &usize, to_node_id: &usize) {
+        self.dependencies[*to_node_id].insert(*from_node_id);
+    }
+
+    // dependants are downstream
+    fn add_dependant(&mut self, from_node_id: &usize, to_node_id: &usize) {
+        self.dependants[*from_node_id].insert(*to_node_id);
+    }
+
+    fn add_relationship(&mut self, from_node_id: &usize, to_node_id: &usize) {
+        self.add_dependant(from_node_id, to_node_id);
+        self.add_dependency(from_node_id, to_node_id);
+    }
+
+    fn add_root_node(&mut self, node_id: &usize) {
+        self.roots.insert(*node_id);
+    }
+
+    fn remove_root_node(&mut self, node_id: &usize) {
+        self.roots.remove(node_id);
+    }
+
+    fn get_next_root(&self) -> Option<&usize> {
+        return self.roots.iter().next();
+    }
+
+    fn get_roots(&self) -> &HashSet<usize> {
+        return &self.roots;
+    }
+
+    fn get_dependencies(&self, node_id: &usize) -> &HashSet<usize> {
+        return &self.dependencies[*node_id];
+    }
+
+    // fn remove_dependency(&mut self, from_node_id: &usize, to_node_id: &usize) {
+    //     self.dependencies[*to_node_id].remove(from_node_id);
+    // }
+
+    fn get_dependants(&self, node_id: &usize) -> &HashSet<usize> {
+        return &self.dependants[*node_id];
+    }
+}
+
 #[derive(Eq, PartialEq, Debug)]
 pub struct Dag<T: Eq + Debug> {
     nodes: Vec<Node<T>>,
     edges: Vec<(usize, usize)>,
-
-    // visitation info
-    roots: RefCell<HashSet<usize>>,
 }
 
 impl<T: Eq + Debug> Dag<T> {
@@ -29,7 +130,6 @@ impl<T: Eq + Debug> Dag<T> {
         return Dag {
             nodes: Vec::new(),
             edges: Vec::new(),
-            roots: RefCell::new(HashSet::new()),
         };
     }
 
@@ -55,95 +155,40 @@ impl<T: Eq + Debug> Dag<T> {
         return self.nodes.iter();
     }
 
-    fn check(&self) -> bool {
-        if self.roots.borrow().is_empty() {
-            panic!("No roots found. DAG is invalid!");
-        }
-
-        if self
-            .roots
-            .borrow()
-            .iter()
-            .all(|root_id| self._check(root_id, &mut HashMap::new()))
-        {
-            return true;
-        } else {
-            panic!("Invalid DAG detected")
-        }
-    }
-
-    fn _check(&self, pt: &usize, visited: &mut HashMap<usize, CycleCheckStatus>) -> bool {
-        visited.insert(*pt, CycleCheckStatus::Processing);
-
-        let deps = self.get_node(*pt).dependants.borrow();
-
-        for dep in deps.iter() {
-            let status = match visited.get(dep) {
-                Some(v) => v,
-                None => &CycleCheckStatus::Initial,
-            };
-
-            match status {
-                CycleCheckStatus::Initial => {
-                    if !self._check(dep, visited) {
-                        return false;
-                    }
-                }
-                CycleCheckStatus::Processing => return false,
-                CycleCheckStatus::Processed => {}
-            }
-        }
-
-        visited.insert(*pt, CycleCheckStatus::Processed);
-
-        true
-    }
-
     // find roots
-    pub fn build_bfs(&self) -> bool {
-        self.roots.replace(HashSet::new());
-        for node in &self.nodes {
-            node.dependencies.borrow_mut().clear();
-            node.dependants.borrow_mut().clear();
-        }
+    pub fn build_bfs(&self) -> Result<DagVisitationInfo, &str> {
+        let mut bfs = DagVisitationInfo::new(self.nodes.len());
+
         for (from_node_id, to_node_id) in &self.edges {
-            self.get_node(*from_node_id)
-                .add_dependant(&self.get_node(*to_node_id));
-            self.get_node(*to_node_id)
-                .add_dependency(&self.get_node(*from_node_id));
+            bfs.add_relationship(from_node_id, to_node_id);
         }
 
         for node in &self.nodes {
-            if node.dependencies.borrow().is_empty() {
-                self.roots.borrow_mut().insert(node.id);
+            if bfs.get_dependencies(node.get_id()).is_empty() {
+                bfs.add_root_node(node.get_id());
             }
         }
 
-        return self.check();
+        return bfs.check();
     }
 
-    pub fn next_in_bfs(&self) -> Option<&Node<T>> {
-        return match self.roots.borrow().iter().next() {
+    pub fn next_in_bfs(&self, visitation_info: &DagVisitationInfo) -> Option<&Node<T>> {
+        return match visitation_info.get_next_root() {
             Some(id) => Some(&self.get_node(*id)),
             None => None,
         };
     }
 
-    pub fn remove_from_bfs(&self, node_id: usize) {
-        let to_remove = &self.get_node(node_id);
-
-        for id in to_remove.dependants.borrow().iter() {
-            self.get_node(*id)
-                .dependencies
-                .borrow_mut()
-                .remove(&to_remove.id);
+    pub fn visited_in_bfs(&self, visitation_info: &mut DagVisitationInfo, node: &Node<T>) {
+        for id in visitation_info.dependants[*node.get_id()].iter() {
+            visitation_info.dependencies[*id].remove(node.get_id());
         }
 
-        self.roots.borrow_mut().remove(&to_remove.id);
+        visitation_info.remove_root_node(node.get_id());
 
-        for id in to_remove.dependants.borrow().iter() {
-            if self.get_node(*id).dependencies.borrow().is_empty() {
-                self.roots.borrow_mut().insert(*id);
+        for id in visitation_info.dependants[*node.get_id()].iter() {
+            if visitation_info.dependencies[*id].is_empty() {
+                visitation_info.roots.insert(*id);
             }
         }
     }
@@ -167,8 +212,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn build_dag() {
+        let mut dag = Dag::new();
+
+        let a = dag.add_node(MockStruct::new('A'));
+        let b = dag.add_node(MockStruct::new('a'));
+        let c = dag.add_node(MockStruct::new('C'));
+        let d = dag.add_node(MockStruct::new('D'));
+        let e = dag.add_node(MockStruct::new('E'));
+        let f = dag.add_node(MockStruct::new('F'));
+        let g = dag.add_node(MockStruct::new('G'));
+        let h = dag.add_node(MockStruct::new('H'));
+
+        dag.connect(a, b);
+        dag.connect(b, c);
+        dag.connect(c, d);
+        dag.connect(d, e);
+        dag.connect(d, f);
+        dag.connect(f, g);
+        dag.connect(f, h);
+
+        let bfs = dag.build_bfs();
+        assert!(bfs.is_ok());
+    }
+
+    #[test]
+    fn build_dag_with_circular_dependency() {
         let mut dag = Dag::new();
 
         let a = dag.add_node(MockStruct::new('A'));
@@ -189,7 +258,8 @@ mod tests {
         dag.connect(f, h);
         dag.connect(d, b); // causes circular dependency
 
-        dag.build_bfs();
+        let bfs = dag.build_bfs();
+        assert!(bfs.is_err());
     }
 
     #[test]
@@ -201,17 +271,17 @@ mod tests {
 
         dag.connect(a, b);
 
-        dag.build_bfs();
+        let mut bfs = dag.build_bfs().unwrap();
 
         assert!(
-            !dag.get_node(b).dependencies.borrow().is_empty(),
+            !bfs.get_dependencies(&b).is_empty(),
             "Node was not successfully removed"
         );
 
-        dag.remove_from_bfs(a);
+        dag.visited_in_bfs(&mut bfs, dag.get_node(a));
 
         assert!(
-            dag.get_node(b).dependencies.borrow().is_empty(),
+            bfs.get_dependencies(&b).is_empty(),
             "Node was not successfully removed"
         );
     }

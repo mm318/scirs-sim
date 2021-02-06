@@ -46,7 +46,7 @@ impl Model {
     }
 
     pub fn get_block_by_id(&self, block_id: usize) -> &dyn Block {
-        return &*self.dag.get_node(block_id).value;
+        return &**self.dag.get_node(block_id).get_value();
     }
 
     pub fn get_block<B>(&self, block_handle: &BlockHandle<B>) -> &dyn Block {
@@ -65,7 +65,7 @@ impl Model {
         return self
             .dag
             .get_mut_node(block_handle.id())
-            .value
+            .get_mut_value()
             .as_mut_any()
             .downcast_mut::<B>()
             .unwrap();
@@ -90,17 +90,15 @@ impl Model {
             // debug
             println!("\nstep {}", step + 1);
 
-            let result = self.dag.build_bfs();
-            assert!(result);
-
+            let mut bfs = self.dag.build_bfs().unwrap();
             loop {
-                match self.dag.next_in_bfs() {
+                match self.dag.next_in_bfs(&bfs) {
                     Some(ref node) => {
                         println!("  Visiting {:?}", node);
 
-                        self.dag.remove_from_bfs(node.id);
+                        self.dag.visited_in_bfs(&mut bfs, node);
 
-                        node.value.calc(self);
+                        node.get_value().calc(self);
                     }
                     None => {
                         break;
@@ -109,7 +107,7 @@ impl Model {
             }
 
             for node in self.dag.iter_nodes() {
-                node.value.update();
+                node.get_value().update();
             }
         }
     }
