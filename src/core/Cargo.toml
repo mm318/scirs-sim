@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Miaofei <ameision@hotmail.com>"]
 edition = "2018"
 
+[dependencies]
+tokio = { version = "1.2.0", features = ["rt-multi-thread"] }
+
 [lib]
 path = "src/lib.rs"
 crate-type = ["dylib"]

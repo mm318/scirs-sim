@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::fmt::Debug;
+use std::marker::Send;
 
 use crate::model::Model;
 
@@ -17,7 +18,7 @@ impl<T: Any> AsAny for T {
     }
 }
 
-pub trait Block: AsAny + Debug {
+pub trait Block: AsAny + Sync + Send + Debug {
     fn calc(&self, model: &Model);
     fn update(&self);
 }

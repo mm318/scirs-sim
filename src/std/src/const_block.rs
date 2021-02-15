@@ -8,12 +8,12 @@ pub struct ConstBlock<T> {
     output1: T,
 }
 
-impl<T: 'static + Debug> Block for ConstBlock<T> {
+impl<T: 'static + Send + Sync + Debug> Block for ConstBlock<T> {
     fn calc(&self, _model: &Model) {}
     fn update(&self) {}
 }
 
-impl<T: 'static + Clone> ConstBlock<T> {
+impl<T: 'static + Send + Sync + Clone> ConstBlock<T> {
     pub fn new(const_val: T) -> Self {
         return Self { output1: const_val };
     }

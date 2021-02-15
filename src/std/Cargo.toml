@@ -6,8 +6,8 @@ edition = "2018"
 
 [dependencies]
 rust_model_core = { path = "../core" }
-rust_model_stdlib_toy = { path = "toy" }
+rust_model_stdlib_toy = { path = "src/toy" }
 
 [lib]
-path = "lib.rs"
+path = "src/lib.rs"
 crate-type = ["dylib"]

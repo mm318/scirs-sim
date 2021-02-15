@@ -1,5 +1,9 @@
 use std::any::Any;
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::task;
 
 use crate::block::{Block, BlockInput};
 use crate::dag::Dag;
@@ -85,10 +89,16 @@ impl Model {
         self.dag.connect(block1_handle.id(), block2_handle.id());
     }
 
-    pub fn exec(&self, steps: usize) {
-        for step in 0..steps {
+    async fn calc_block(self: Arc<Model>, node_id: usize) {
+        self.dag.get_node(node_id).get_value().calc(&self);
+    }
+
+    pub async fn exec(self: Arc<Model>, steps: &usize) {
+        for step in 0..*steps {
             // debug
             println!("\nstep {}", step + 1);
+
+            let mut futures_vec = Vec::<task::JoinHandle<_>>::new();
 
             let mut bfs = self.dag.build_bfs().unwrap();
             loop {
@@ -98,12 +108,19 @@ impl Model {
 
                         self.dag.visited_in_bfs(&mut bfs, node);
 
-                        node.get_value().calc(self);
+                        let self_copy = self.clone();
+                        let node_id = *node.get_id();
+                        let future = task::spawn(self_copy.calc_block(node_id));
+                        futures_vec.push(future);
                     }
                     None => {
                         break;
                     }
                 }
+            }
+
+            for future in futures_vec {
+                future.await;
             }
 
             for node in self.dag.iter_nodes() {

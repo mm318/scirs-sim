@@ -4,6 +4,7 @@ use std::cmp::Eq;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::marker::Send;
 use std::slice::Iter;
 
 use crate::dag::node::Node;
@@ -143,6 +144,10 @@ impl<T: Eq + Debug> Dag<T> {
         self.edges.push((from_node_id, to_node_id));
     }
 
+    pub fn get_num_nodes(&self) -> usize {
+        return self.nodes.len();
+    }
+
     pub fn get_node(&self, node_id: usize) -> &Node<T> {
         return &self.nodes[node_id];
     }
@@ -157,7 +162,7 @@ impl<T: Eq + Debug> Dag<T> {
 
     // find roots
     pub fn build_bfs(&self) -> Result<DagVisitationInfo, &str> {
-        let mut bfs = DagVisitationInfo::new(self.nodes.len());
+        let mut bfs = DagVisitationInfo::new(self.get_num_nodes());
 
         for (from_node_id, to_node_id) in &self.edges {
             bfs.add_relationship(from_node_id, to_node_id);
@@ -193,6 +198,8 @@ impl<T: Eq + Debug> Dag<T> {
         }
     }
 }
+
+unsafe impl<T: Eq + Debug> Send for Dag<T> {}
 
 #[cfg(test)]
 mod tests {

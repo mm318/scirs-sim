@@ -5,7 +5,7 @@ authors = ["Miaofei <ameision@hotmail.com>"]
 edition = "2018"
 
 [dependencies]
-rust_model_core = { path = "../../core" }
+rust_model_core = { path = "../../../core" }
 
 [lib]
 path = "src/toy_type_1.rs"
