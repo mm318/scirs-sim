@@ -1,12 +1,42 @@
 use std::any::Any;
-use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::task;
 
 use crate::block::{Block, BlockInput};
 use crate::dag::Dag;
+
+enum CloneableOption<T> {
+    Some(T),
+    None,
+}
+
+impl<T> CloneableOption<T> {
+    fn unwrap(&mut self) -> T {
+        let mut result = CloneableOption::None;
+        std::mem::swap(self, &mut result);
+        return match result {
+            Self::Some(val) => val,
+            Self::None => panic!("called `CloneableOption::unwrap()` on a `None` value"),
+        };
+    }
+}
+
+impl<T> Clone for CloneableOption<T> {
+    fn clone(&self) -> Self {
+        return Self::None;
+    }
+}
+
+// // specialization is not yet a stable feature
+// impl<T: Clone> Clone for CloneableOption<T> {
+//     fn clone(&self) -> Self {
+//         return match self {
+//             Some(x) => Some(x.clone()),
+//             None => None,
+//         };
+//     }
+// }
 
 pub trait BlockType {
     type BlockType;
@@ -89,8 +119,13 @@ impl Model {
         self.dag.connect(block1_handle.id(), block2_handle.id());
     }
 
-    async fn calc_block(self: Arc<Model>, node_id: usize) {
+    async fn calc_block<T>(
+        self: Arc<Model>,
+        node_id: usize,
+        futures: Arc<RwLock<Vec<CloneableOption<task::JoinHandle<T>>>>>,
+    ) {
         self.dag.get_node(node_id).get_value().calc(&self);
+        self.dag.get_node(node_id).get_value().update();
     }
 
     pub async fn exec(self: Arc<Model>, steps: &usize) {
@@ -98,7 +133,15 @@ impl Model {
             // debug
             println!("\nstep {}", step + 1);
 
-            let mut futures_vec = Vec::<task::JoinHandle<_>>::new();
+            let futures_vec = Arc::new(RwLock::new(
+                Vec::<CloneableOption<task::JoinHandle<_>>>::with_capacity(
+                    self.dag.get_num_nodes(),
+                ),
+            ));
+            futures_vec
+                .write()
+                .unwrap()
+                .resize(self.dag.get_num_nodes(), CloneableOption::None);
 
             let mut bfs = self.dag.build_bfs().unwrap();
             loop {
@@ -110,8 +153,12 @@ impl Model {
 
                         let self_copy = self.clone();
                         let node_id = *node.get_id();
-                        let future = task::spawn(self_copy.calc_block(node_id));
-                        futures_vec.push(future);
+                        let futures_copy = futures_vec.clone();
+                        let future = CloneableOption::Some(task::spawn(
+                            self_copy.calc_block(node_id, futures_copy),
+                        ));
+
+                        futures_vec.write().unwrap()[*node.get_id()] = future;
                     }
                     None => {
                         break;
@@ -119,12 +166,8 @@ impl Model {
                 }
             }
 
-            for future in futures_vec {
-                future.await;
-            }
-
-            for node in self.dag.iter_nodes() {
-                node.get_value().update();
+            for future in futures_vec.write().unwrap().iter_mut() {
+                let _ = future.unwrap().await;
             }
         }
     }

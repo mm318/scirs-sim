@@ -123,7 +123,7 @@ impl DagVisitationInfo {
 #[derive(Eq, PartialEq, Debug)]
 pub struct Dag<T: Eq + Debug> {
     nodes: Vec<Node<T>>,
-    edges: Vec<(usize, usize)>,
+    edges: Vec<(usize, usize)>, // (from_node_id, to_node_id)
 }
 
 impl<T: Eq + Debug> Dag<T> {
