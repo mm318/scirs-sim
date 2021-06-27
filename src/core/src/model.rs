@@ -1,6 +1,10 @@
 use std::any::Any;
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::task::{Context, Poll};
+use std::pin::Pin;
+
 use tokio::task;
 
 use crate::block::{Block, BlockInput};
@@ -66,6 +70,29 @@ pub struct Model {
 //     ready: VecDeque<&'a Node<'a, &'a dyn Block>>,
 // }
 
+struct CalcBlockFuture {
+    model: Arc<Model>,
+    node_id: usize,
+    futures: Arc<Vec<Mutex<CloneableOption<CalcBlockFuture>>>>,
+}
+
+impl Future for CalcBlockFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        for from_node_id in self.model.dag.get_dependencies(&self.node_id) {
+            match Pin::new(&mut self.futures[*from_node_id].lock().unwrap().unwrap()).poll(cx) {
+                Poll::Ready(_) => continue,
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        self.model.dag.get_node(self.node_id).get_value().calc(self.model.as_ref());
+        self.model.dag.get_node(self.node_id).get_value().update();
+        return Poll::Ready(());
+    }
+}
+
 impl Model {
     pub fn new() -> Self {
         return Model { dag: Dag::new() };
@@ -119,29 +146,31 @@ impl Model {
         self.dag.connect(block1_handle.id(), block2_handle.id());
     }
 
-    async fn calc_block<T>(
+    fn create_calc_block_future(
         self: Arc<Model>,
         node_id: usize,
-        futures: Arc<RwLock<Vec<CloneableOption<task::JoinHandle<T>>>>>,
+        futures: Arc<Vec<Mutex<CloneableOption<CalcBlockFuture>>>>,
     ) {
-        self.dag.get_node(node_id).get_value().calc(&self);
-        self.dag.get_node(node_id).get_value().update();
+        let future = CloneableOption::Some(CalcBlockFuture{model: self, node_id: node_id, futures: futures.clone()});
+        *futures[node_id].lock().unwrap() = future;
     }
 
-    pub async fn exec(self: Arc<Model>, steps: &usize) {
+    pub fn exec(self: Arc<Model>, steps: &usize) {
         for step in 0..*steps {
             // debug
             println!("\nstep {}", step + 1);
 
-            let futures_vec = Arc::new(RwLock::new(
-                Vec::<CloneableOption<task::JoinHandle<_>>>::with_capacity(
+            let mut futures_vec = Vec::<Mutex<CloneableOption<CalcBlockFuture>>>::with_capacity(
                     self.dag.get_num_nodes(),
-                ),
-            ));
-            futures_vec
-                .write()
-                .unwrap()
-                .resize(self.dag.get_num_nodes(), CloneableOption::None);
+                );
+
+            // futures_vec.resize(self.dag.get_num_nodes(), Mutex::new(CloneableOption::None));
+            for _ in 0..self.dag.get_num_nodes() {
+                futures_vec.push(Mutex::new(CloneableOption::None));
+            }
+
+            // each future will have a copy of this Arc
+            let futures_vec_arc = Arc::new(futures_vec);
 
             let mut bfs = self.dag.build_bfs().unwrap();
             loop {
@@ -153,21 +182,13 @@ impl Model {
 
                         let self_copy = self.clone();
                         let node_id = *node.get_id();
-                        let futures_copy = futures_vec.clone();
-                        let future = CloneableOption::Some(task::spawn(
-                            self_copy.calc_block(node_id, futures_copy),
-                        ));
-
-                        futures_vec.write().unwrap()[*node.get_id()] = future;
+                        let futures_vec_copy = futures_vec_arc.clone();
+                        self_copy.create_calc_block_future(node_id, futures_vec_copy);
                     }
                     None => {
                         break;
                     }
                 }
-            }
-
-            for future in futures_vec.write().unwrap().iter_mut() {
-                let _ = future.unwrap().await;
             }
         }
     }

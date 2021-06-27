@@ -123,28 +123,31 @@ impl DagVisitationInfo {
 #[derive(Eq, PartialEq, Debug)]
 pub struct Dag<T: Eq + Debug> {
     nodes: Vec<Node<T>>,
-    edges: Vec<(usize, usize)>, // (from_node_id, to_node_id)
+    dependencies: Vec<HashSet<usize>>,
+    // edges: Vec<(usize, usize)>, // (from_node_id, to_node_id)
 }
 
 impl<T: Eq + Debug> Dag<T> {
     pub fn new() -> Self {
         return Dag {
             nodes: Vec::new(),
-            edges: Vec::new(),
+            dependencies: Vec::new(),
         };
     }
 
     pub fn add_node(&mut self, value: T) -> usize {
         let id = self.nodes.len();
         self.nodes.push(Node::new(id, value));
+        self.dependencies.push(HashSet::new());
         return id;
     }
 
     pub fn connect(&mut self, from_node_id: usize, to_node_id: usize) {
-        self.edges.push((from_node_id, to_node_id));
+        self.dependencies[to_node_id].insert(from_node_id);
     }
 
     pub fn get_num_nodes(&self) -> usize {
+        assert_eq!(self.nodes.len(), self.dependencies.len());
         return self.nodes.len();
     }
 
@@ -160,12 +163,18 @@ impl<T: Eq + Debug> Dag<T> {
         return self.nodes.iter();
     }
 
+    pub fn get_dependencies(&self, node_id: &usize) -> &HashSet<usize> {
+        return &self.dependencies[*node_id];
+    }
+
     // find roots
     pub fn build_bfs(&self) -> Result<DagVisitationInfo, &str> {
         let mut bfs = DagVisitationInfo::new(self.get_num_nodes());
 
-        for (from_node_id, to_node_id) in &self.edges {
-            bfs.add_relationship(from_node_id, to_node_id);
+        for (to_node_id, deps) in self.dependencies.iter().enumerate() {
+            for from_node_id in deps {
+                bfs.add_relationship(from_node_id, &to_node_id);
+            }
         }
 
         for node in &self.nodes {

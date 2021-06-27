@@ -9,4 +9,4 @@ rust_model_core = { path = "../../../core" }
 
 [lib]
 path = "src/toy_type_1.rs"
-crate-type = ["dylib"]
+crate-type = ["rlib", "dylib"]

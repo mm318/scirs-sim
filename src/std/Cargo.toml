@@ -10,4 +10,4 @@ rust_model_stdlib_toy = { path = "src/toy" }
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["dylib"]
+crate-type = ["rlib", "dylib"]

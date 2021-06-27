@@ -9,4 +9,4 @@ tokio = { version = "1.2.0", features = ["rt-multi-thread"] }
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["dylib"]
+crate-type = ["rlib", "dylib"]
