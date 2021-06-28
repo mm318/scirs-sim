@@ -5,7 +5,7 @@ authors = ["Miaofei <ameision@hotmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.2.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.7.1", features = ["rt-multi-thread"] }
 
 [lib]
 path = "src/lib.rs"
