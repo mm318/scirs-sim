@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use tokio;
 
-// #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+// #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn main() {
     let mut model = Model::new();
 

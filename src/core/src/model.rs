@@ -2,7 +2,7 @@ use std::any::Any;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 
 use tokio::task;
@@ -10,38 +10,6 @@ use tokio::task::JoinHandle;
 
 use crate::block::{Block, BlockInput};
 use crate::dag::Dag;
-
-// enum CloneableOption<T> {
-//     Some(T),
-//     None,
-// }
-//
-// impl<T> CloneableOption<T> {
-//     fn unwrap(&mut self) -> T {
-//         let mut result = CloneableOption::None;
-//         std::mem::swap(self, &mut result);
-//         return match result {
-//             Self::Some(val) => val,
-//             Self::None => panic!("called `CloneableOption::unwrap()` on a `None` value"),
-//         };
-//     }
-// }
-//
-// impl<T> Clone for CloneableOption<T> {
-//     fn clone(&self) -> Self {
-//         return Self::None;
-//     }
-// }
-//
-// // specialization is not yet a stable feature
-// impl<T: Clone> Clone for CloneableOption<T> {
-//     fn clone(&self) -> Self {
-//         return match self {
-//             Some(x) => Some(x.clone()),
-//             None => None,
-//         };
-//     }
-// }
 
 pub trait BlockType {
     type BlockType;
@@ -66,15 +34,37 @@ pub struct Model {
     dag: Dag<Box<dyn Block>>,
 }
 
-struct JoinHandleWithCompletionFlag {
+struct CalcBlockJoinHandle {
     join_handle: JoinHandle<()>,
     completed: bool,
+}
+
+struct CalcBlockTask {
+    lock: Mutex<Option<CalcBlockJoinHandle>>,
+    condvar: Condvar,
+}
+
+impl CalcBlockTask {
+    fn new() -> Self {
+        return CalcBlockTask {
+            lock: Mutex::new(Option::None),
+            condvar: Condvar::new(),
+        };
+    }
+
+    fn lock(&self) -> MutexGuard<Option<CalcBlockJoinHandle>> {
+        return self.lock.lock().unwrap();
+    }
+
+    fn notify(&self) {
+        self.condvar.notify_all();
+    }
 }
 
 struct CalcBlockFuture {
     model: Arc<Model>,
     node_id: usize,
-    futures: Arc<Vec<Mutex<Option<JoinHandleWithCompletionFlag>>>>,
+    futures: Arc<Vec<CalcBlockTask>>,
 }
 
 impl Future for CalcBlockFuture {
@@ -83,13 +73,13 @@ impl Future for CalcBlockFuture {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         for from_node_id in self.model.dag.get_dependencies(&self.node_id) {
             if cfg!(debug_assertions) {
-                match *self.futures[*from_node_id].lock().unwrap() {
+                match *self.futures[*from_node_id].lock() {
                     Option::Some(_) => {}
-                    Option::None => println!("Node {} has no future!", *from_node_id),
+                    Option::None => println!("Node {} is missing a future / join handle!", *from_node_id),
                 }
             }
 
-            let mut locked_guard = self.futures[*from_node_id].lock().unwrap();
+            let mut locked_guard = self.futures[*from_node_id].lock();
             let join_handle = locked_guard.as_mut().unwrap();
             if join_handle.completed {
                 continue;
@@ -110,10 +100,10 @@ impl Future for CalcBlockFuture {
 
         self.futures[self.node_id]
             .lock()
-            .unwrap()
             .as_mut()
             .unwrap()
             .completed = true;
+        self.futures[self.node_id].notify();
 
         return Poll::Ready(());
     }
@@ -172,31 +162,27 @@ impl Model {
         self.dag.connect(block1_handle.id(), block2_handle.id());
     }
 
-    fn spawn_calc_block_task(
-        self: Arc<Model>,
-        node_id: usize,
-        futures: Arc<Vec<Mutex<Option<JoinHandleWithCompletionFlag>>>>,
-    ) {
-        if cfg!(debug_assertions) {
-            println!("Adding future for node {}", node_id);
-        }
+    fn spawn_calc_block_task(self: Arc<Model>, node_id: usize, futures: Arc<Vec<CalcBlockTask>>) {
+        // if cfg!(debug_assertions) {
+        //     println!("Adding future for node {}", node_id);
+        // }
 
         let future_task = task::spawn(CalcBlockFuture {
             model: self,
             node_id: node_id,
             futures: futures.clone(),
         });
-        *futures[node_id].lock().unwrap() = Option::Some(JoinHandleWithCompletionFlag {
+        *futures[node_id].lock() = Option::Some(CalcBlockJoinHandle {
             join_handle: future_task,
             completed: false,
         });
 
-        if cfg!(debug_assertions) {
-            match *futures.clone()[node_id].lock().unwrap() {
-                Option::Some(_) => println!("Node {} has a future!", node_id),
-                Option::None => println!("Node {} has no future!", node_id),
-            }
-        }
+        // if cfg!(debug_assertions) {
+        //     match *futures.clone()[node_id].lock() {
+        //         Option::Some(_) => println!("Node {} has a future!", node_id),
+        //         Option::None => println!("Node {} has no future!", node_id),
+        //     }
+        // }
     }
 
     pub async fn exec(self: Arc<Model>, steps: &usize) {
@@ -205,13 +191,11 @@ impl Model {
                 println!("\nstep {}", step + 1);
             }
 
-            let mut futures_vec = Vec::<Mutex<Option<JoinHandleWithCompletionFlag>>>::with_capacity(
-                self.dag.get_num_nodes(),
-            );
+            let mut futures_vec = Vec::<CalcBlockTask>::with_capacity(self.dag.get_num_nodes());
 
             // futures_vec.resize(self.dag.get_num_nodes(), Mutex::new(Option::None));
             for _ in 0..self.dag.get_num_nodes() {
-                futures_vec.push(Mutex::new(Option::None));
+                futures_vec.push(CalcBlockTask::new());
             }
 
             // each future will have a copy of this Arc
@@ -239,12 +223,9 @@ impl Model {
             }
 
             for future_iter in futures_vec_arc.iter() {
-                let mut locked_guard = future_iter.lock().unwrap();
-                let join_handle = locked_guard.as_mut().unwrap();
-                if join_handle.completed {
-                    continue;
-                } else {
-                    let _ = (&mut join_handle.join_handle).await;
+                let mut locked_guard = future_iter.lock();
+                while !locked_guard.as_ref().unwrap().completed {
+                    locked_guard = future_iter.condvar.wait(locked_guard).unwrap();
                 }
             }
         }
